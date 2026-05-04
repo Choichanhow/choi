@@ -2,6 +2,10 @@
 AKShare 数据源适配器 — A-Share Market Dashboard
 MANIFESTO II: 数据原子化 — 只负责"拿"，不负责"算"
 MANIFESTO IV: 鲁棒性预设 — 所有接口必须有降级处理
+
+优化点：
+1. 批量获取: 一次 HTTP 请求拉取全量指数，本地筛选，节省 2/3 请求
+2. 内存缓存: 板块数据 30s TTL，指数数据 5s TTL
 """
 
 import asyncio
@@ -12,82 +16,89 @@ import akshare as ak
 import pandas as pd
 
 from data.fetcher import safe_fetch, format_error_response
-from config.settings import INDEX_CODES, FALLBACK_VALUES, ERROR_MESSAGE
-
-
-INDEX_NAME_MAP = {
-    "shanghai": "000001",
-    "shenzhen": "399001",
-    "chinext": "399006",
-    "star_50": "000688",
-}
+from config.settings import (
+    INDEX_CODES, INDEX_TDX_MAP, FALLBACK_VALUES, ERROR_MESSAGE
+)
 
 
 class AKShareAdapter:
     name = "akshare"
     supported_index_codes = INDEX_CODES
 
-    _sector_cache: Optional[dict] = None
+    _all_indices_df: Optional[pd.DataFrame] = None
+    _indices_cache_time: float = 0
+    INDICES_CACHE_TTL: float = 5.0
+
+    _sector_cache: Optional[list] = None
     _sector_cache_time: float = 0
-    CACHE_TTL_SECONDS: float = 30.0
+    SECTOR_CACHE_TTL: float = 30.0
 
     async def fetch_index_realtime(self, index_code: str) -> dict:
+        df = await self._fetch_all_indices_cached()
+        if df is None or df.empty:
+            return format_error_response("AKSHARE_NO_DATA")
+
+        code = INDEX_CODES.get(index_code, index_code)
+        row = df[df["代码"] == code]
+        if row.empty:
+            return format_error_response(f"AKSHARE_INDEX_NOT_FOUND: {index_code}")
+
+        row = row.iloc[0]
+        return {
+            "source": self.name,
+            "index_code": index_code,
+            "code": safe_fetch(row, "代码", ERROR_MESSAGE),
+            "name": safe_fetch(row, "名称", "未知"),
+            "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+            "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+            "change_amount": safe_fetch(row, "涨跌额", 0.0),
+            "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
+            "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
+            "open": safe_fetch(row, "今开", 0.0),
+            "high": safe_fetch(row, "最高", 0.0),
+            "low": safe_fetch(row, "最低", 0.0),
+            "prev_close": safe_fetch(row, "昨收", 0.0),
+        }
+
+    async def _fetch_all_indices_cached(self) -> Optional[pd.DataFrame]:
+        now = time.time()
+        if (
+            self._all_indices_df is not None
+            and (now - self._indices_cache_time) < self.INDICES_CACHE_TTL
+        ):
+            return self._all_indices_df
+
         try:
             df = await asyncio.to_thread(
                 ak.stock_zh_index_spot_em, symbol="沪深重要指数"
             )
-            if df is None or df.empty:
-                return format_error_response("AKSHARE_NO_DATA")
-
-            code = INDEX_NAME_MAP.get(index_code, index_code)
-            row = df[df["代码"] == code]
-            if row.empty:
-                return format_error_response(f"AKSHARE_INDEX_NOT_FOUND: {index_code}")
-
-            row = row.iloc[0]
-            return {
-                "source": self.name,
-                "index_code": index_code,
-                "code": safe_fetch(row, "代码", ERROR_MESSAGE),
-                "name": safe_fetch(row, "名称", "未知"),
-                "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
-                "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
-                "change_amount": safe_fetch(row, "涨跌额", 0.0),
-                "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
-                "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
-                "open": safe_fetch(row, "今开", 0.0),
-                "high": safe_fetch(row, "最高", 0.0),
-                "low": safe_fetch(row, "最低", 0.0),
-                "prev_close": safe_fetch(row, "昨收", 0.0),
-            }
-        except Exception as e:
-            return format_error_response(f"AKSHARE_ERROR: {type(e).__name__}")
+            if df is not None and not df.empty:
+                self._all_indices_df = df
+                self._indices_cache_time = now
+            return df
+        except Exception:
+            return self._all_indices_df
 
     async def fetch_all_indices(self) -> list[dict]:
-        try:
-            df = await asyncio.to_thread(
-                ak.stock_zh_index_spot_em, symbol="沪深重要指数"
-            )
-            if df is None or df.empty:
-                return []
-            result = []
-            for _, row in df.iterrows():
-                result.append({
-                    "source": self.name,
-                    "code": safe_fetch(row, "代码", ERROR_MESSAGE),
-                    "name": safe_fetch(row, "名称", ERROR_MESSAGE),
-                    "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
-                    "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
-                    "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
-                    "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
-                })
-            return result
-        except Exception as e:
-            return [{"error": True, "reason": f"AKSHARE_ALL_INDICES_ERROR: {type(e).__name__}"}]
+        df = await self._fetch_all_indices_cached()
+        if df is None or df.empty:
+            return []
+        result = []
+        for _, row in df.iterrows():
+            result.append({
+                "source": self.name,
+                "code": safe_fetch(row, "代码", ERROR_MESSAGE),
+                "name": safe_fetch(row, "名称", ERROR_MESSAGE),
+                "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
+                "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
+            })
+        return result
 
     async def fetch_sector_list(self, use_cache: bool = True) -> list[dict]:
         now = time.time()
-        if use_cache and self._sector_cache and (now - self._sector_cache_time) < self.CACHE_TTL_SECONDS:
+        if use_cache and self._sector_cache and (now - self._sector_cache_time) < self.SECTOR_CACHE_TTL:
             return self._sector_cache
 
         try:

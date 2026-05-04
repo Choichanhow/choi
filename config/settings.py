@@ -25,6 +25,15 @@ INDEX_CODES = {
     "star_50": "000688",
 }
 
+INDEX_TDX_MAP = {
+    "shanghai": (0, "000001"),
+    "shenzhen": (0, "399001"),
+    "chinext": (0, "399006"),
+    "star_50": (0, "000688"),
+}
+
+PYTDX_BEST_SERVER = ("218.106.92.183", 7709)
+
 DEFAULT_INDEX = "shanghai"
 
 FALLBACK_VALUES = {

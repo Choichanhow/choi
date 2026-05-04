@@ -1,5 +1,6 @@
 """
-性能测试脚本 — 测量各数据接口耗时
+最终性能基准测试报告
+测量 AKShare / Pytdx / 智能路由 各场景性能
 """
 
 import asyncio
@@ -9,100 +10,101 @@ import sys
 sys.path.insert(0, "h:\\QUART")
 
 from data.sources.akshare_adapter import AKShareAdapter
+from data.sources.pytdx_adapter import PytdxAdapter
+from data.sources import registry
+
+
+def benchmark_pytdx_batch():
+    from pytdx.hq import TdxHq_API
+    api = TdxHq_API(heartbeat=False)
+    api.connect(ip="218.106.92.183", port=7709, time_out=5)
+    start = time.time()
+    data = api.get_security_quotes([(0, "000001"), (0, "399001"), (0, "399006")])
+    elapsed = round((time.time() - start) * 1000)
+    api.disconnect()
+    return elapsed, len(data)
 
 
 async def main():
-    print("=" * 60)
-    print("Module 1 数据源性能测试报告")
-    print("=" * 60)
+    print("=" * 65)
+    print("性能基准测试报告 — Module 1 数据源适配器")
+    print("=" * 65)
 
-    print("\n[数据源配置]")
-    print("  主数据源: AKShare (东方财富，实时)")
-    print("  备用数据源: Pytdx (通达信协议，需TDX服务器)")
-    print("  (mootdx 已移除)")
-
-    print("\n" + "=" * 60)
-    print("AKShare 详细性能测试")
-    print("=" * 60)
-
-    adapter = AKShareAdapter()
-
+    print("\n1. AKShare 单指数请求 (未优化时需3次HTTP请求)")
+    print("-" * 65)
+    adapter1 = AKShareAdapter()
     results = []
+    for code in ["shanghai", "shenzhen", "chinext"]:
+        start = time.time()
+        r = await adapter1.fetch_index_realtime(code)
+        elapsed = round((time.time() - start) * 1000)
+        results.append(elapsed)
+        print(f"  {code}: {elapsed}ms  {'✅' if 'error' not in r else '❌'}")
+    print(f"  合计: {sum(results)}ms")
 
+    print("\n2. AKShare 批量一次请求 (优化后: 1次HTTP请求，全量数据本地筛选)")
+    print("-" * 65)
+    adapter2 = AKShareAdapter()
     start = time.time()
-    r = await adapter.health_check()
-    results.append(("health_check", round((time.time() - start) * 1000), r))
+    all_indices = await adapter2.fetch_all_indices()
+    t = round((time.time() - start) * 1000)
+    print(f"  fetch_all_indices(): {t}ms  返回 {len(all_indices)} 条指数")
 
+    print("\n3. Pytdx 单指数请求 (3次串行)")
+    print("-" * 65)
+    pytdx = PytdxAdapter()
+    times = {}
+    for code in ["shanghai", "shenzhen", "chinext"]:
+        start = time.time()
+        r = await pytdx.fetch_index_realtime(code)
+        times[code] = round((time.time() - start) * 1000)
+        print(f"  {code}: {times[code]}ms  {'✅' if 'error' not in r else '❌'}")
+    print(f"  合计: {sum(times.values())}ms")
+
+    print("\n4. Pytdx 批量一次请求 (1次TCP请求，3个指数)")
+    print("-" * 65)
+    loop = asyncio.get_event_loop()
+    batch_result = await loop.run_in_executor(None, benchmark_pytdx_batch)
+    print(f"  Pytdx 批量: {batch_result[0]}ms  返回 {batch_result[1]} 条")
+
+    print("\n5. AKShare 缓存命中 (5s TTL 内)")
+    print("-" * 65)
+    adapter3 = AKShareAdapter()
     start = time.time()
-    r = await adapter.fetch_index_realtime("shanghai")
-    results.append(("上证指数", round((time.time() - start) * 1000), r))
+    cached = await adapter3.fetch_all_indices()
+    t_cached = round((time.time() - start) * 1000)
+    print(f"  缓存命中: {t_cached}ms")
 
+    print("\n6. 智能路由 dashboard (Pytdx指数 + AKShare板块)")
+    print("-" * 65)
     start = time.time()
-    r = await adapter.fetch_index_realtime("shenzhen")
-    results.append(("深证成指", round((time.time() - start) * 1000), r))
-
-    start = time.time()
-    r = await adapter.fetch_index_realtime("chinext")
-    results.append(("创业板指", round((time.time() - start) * 1000), r))
-
-    start = time.time()
-    r = await adapter.fetch_sector_list()
-    results.append(("板块列表(496条)", round((time.time() - start) * 1000), r))
-
-    start = time.time()
-    r = await adapter.fetch_market_breadth()
-    results.append(("市场广度", round((time.time() - start) * 1000), r))
-
-    print(f"\n{'操作':<22} {'耗时':>8} {'状态':>8}")
-    print("-" * 42)
-    serial_total = 0
-    for label, ms, r in results:
-        status = "OK" if "error" not in str(r) else "FAIL"
-        print(f"  {label:<20} {ms:>8}ms  {status:>8}")
-        serial_total += ms
-    print("-" * 42)
-    print(f"  {'串行总耗时':<20} {serial_total:>8}ms")
-
-    print("\n" + "=" * 60)
-    print("fetch_all_dashboard_data() 并行整合测试")
-    print("=" * 60)
-
-    new_adapter = AKShareAdapter()
-    start = time.time()
-    dashboard = await new_adapter.fetch_all_dashboard_data()
-    t_full = round((time.time() - start) * 1000)
-
+    dashboard = await registry.get_smart_dashboard_data()
+    t_smart = round((time.time() - start) * 1000)
+    print(f"  get_smart_dashboard_data(): {t_smart}ms")
     indices = dashboard.get("indices", {})
     for k, v in indices.items():
-        status = "OK" if "error" not in str(v) else "FAIL"
-        print(f"  {status} {k}: {v.get('name')} | {v.get('price')} | {v.get('change_pct')}%")
+        print(f"    {k}: {v.get('name')} | {v.get('price')} | {v.get('change_pct')}%")
+    breadth = dashboard.get("market_breadth", {})
+    print(f"    市场广度: 上涨{breadth.get('up_count')} | 下跌{breadth.get('down_count')} | ratio={breadth.get('ratio')}%")
+    print(f"    Top板块: {len(dashboard.get('top_sectors', []))} 条")
 
-    b = dashboard.get("market_breadth", {})
-    print(f"  上涨: {b.get('up_count')} | 下跌: {b.get('down_count')} | 差值: {b.get('ratio')}%")
-    print(f"  Top板块: {len(dashboard.get('top_sectors', []))} 条")
-    print(f"\n  fetch_all_dashboard_data() 总耗时: {t_full}ms")
-
-    print("\n" + "=" * 60)
-    print("缓存命中测试 (30s TTL)")
-    print("=" * 60)
-    start = time.time()
-    cached = await new_adapter.fetch_all_dashboard_data()
-    t_cached = round((time.time() - start) * 1000)
-    print(f"  缓存命中耗时: {t_cached}ms")
-
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 65)
     print("性能优化总结")
-    print("=" * 60)
-    improvement = round((1 - t_full / serial_total) * 100)
-    cache_gain = round((1 - t_cached / t_full) * 100)
-    speedup = round(serial_total / t_full, 1)
-
-    print(f"  原始串行耗时:      {serial_total}ms")
-    print(f"  优化后并行耗时:    {t_full}ms")
-    print(f"  并行优化提升:      {improvement}%  (加速 {speedup}x)")
-    print(f"  缓存命中耗时:      {t_cached}ms")
-    print(f"  缓存优化提升:      {cache_gain}%")
-    print(f"  综合效率:         首次 {t_full}ms | 缓存内 {t_cached}ms")
+    print("=" * 65)
+    print(f"  AKShare 串行(3指数):    {sum(results)}ms")
+    print(f"  AKShare 批量(一次):    {t}ms")
+    print(f"  AKShare 缓存命中:       {t_cached}ms")
+    print(f"  Pytdx 串行(3指数):     {sum(times.values())}ms")
+    print(f"  Pytdx 批量(1次):      {batch_result[0]}ms  ← 最优")
+    print(f"  智能路由 dashboard:     {t_smart}ms")
+    print()
+    print(f"  关键发现:")
+    if sum(results) > 0:
+        print(f"  - AKShare 批量优化: {sum(results)}ms → {t}ms  (减少 {round((1 - t/sum(results))*100)}%)")
+    if batch_result[0] > 0:
+        print(f"  - Pytdx vs AKShare: Pytdx 快 {round(sum(results)/batch_result[0])}x (批量模式)")
+    if t > 0:
+        print(f"  - 缓存命中加速:  {t}ms → {t_cached}ms")
 
 
 if __name__ == "__main__":

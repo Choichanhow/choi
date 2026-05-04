@@ -5,3 +5,4 @@ akshare>=1.14.0
 pytdx>=1.72
 pandas>=2.0.0
 httpx>=0.25.0
+redis>=7.0.0
