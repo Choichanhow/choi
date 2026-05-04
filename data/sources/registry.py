@@ -1,19 +1,19 @@
 """
 数据源注册中心 — A-Share Market Dashboard
-提供统一的获取接口，支持 AKShare / Mootdx 双数据源切换
+提供统一的获取接口，支持 AKShare / Pytdx 双数据源切换
 """
 
 from typing import Literal
 
 from data.sources.akshare_adapter import AKShareAdapter
-from data.sources.mootdx_adapter import MootdxAdapter
+from data.sources.pytdx_adapter import PytdxAdapter
 
 ADAPTERS = {
     "akshare": AKShareAdapter(),
-    "mootdx": MootdxAdapter(),
+    "pytdx": PytdxAdapter(),
 }
 
-DEFAULT_SOURCE: Literal["akshare", "mootdx"] = "akshare"
+DEFAULT_SOURCE: Literal["akshare", "pytdx"] = "akshare"
 
 
 def get_adapter(source: str = DEFAULT_SOURCE):
@@ -46,6 +46,11 @@ async def fetch_all_indices(source: str = DEFAULT_SOURCE) -> list[dict]:
     tasks = [adapter.fetch_index_realtime(code) for code in INDEX_CODES]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return [r if not isinstance(r, Exception) else {"error": str(r)} for r in results]
+
+
+async def fetch_all_dashboard_data(source: str = DEFAULT_SOURCE) -> dict:
+    adapter = get_adapter(source)
+    return await adapter.fetch_all_dashboard_data()
 
 
 import asyncio
