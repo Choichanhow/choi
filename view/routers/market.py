@@ -3,6 +3,9 @@
 MANIFESTO III: 视图无状态 — 路由仅负责转发数据，不处理业务逻辑
 """
 
+import asyncio
+from functools import partial
+
 from fastapi import APIRouter, HTTPException
 
 from data.sources import registry
@@ -15,50 +18,68 @@ from logic.indicators import (
 
 router = APIRouter(prefix="/api", tags=["market"])
 
+API_TIMEOUT = 180.0
+
+
+async def _with_timeout(coro, timeout):
+    return await asyncio.wait_for(coro, timeout=timeout)
+
 
 @router.get("/market/overview")
 async def market_overview():
-    raw = await registry.get_smart_dashboard_data()
-    return calc_market_overview(raw)
+    try:
+        raw = await _with_timeout(registry.get_smart_dashboard_data(), API_TIMEOUT)
+        return calc_market_overview(raw)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="请求超时，请稍后重试")
 
 
 @router.get("/indices/realtime")
 async def indices_realtime():
-    raw = await registry.get_smart_dashboard_data()
-    indices = raw.get("indices", {})
-    return {
-        k: {
-            "name": v.get("name", "--"),
-            "price": v.get("price", 0),
-            "change_pct": v.get("change_pct", 0),
-            "source": v.get("source", "unknown"),
+    try:
+        raw = await _with_timeout(registry.get_smart_dashboard_data(), API_TIMEOUT)
+        indices = raw.get("indices", {})
+        return {
+            k: {
+                "name": v.get("name", "--"),
+                "price": v.get("price", 0),
+                "change_pct": v.get("change_pct", 0),
+                "source": v.get("source", "unknown"),
+            }
+            for k, v in indices.items()
+            if isinstance(v, dict)
         }
-        for k, v in indices.items()
-        if isinstance(v, dict)
-    }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="请求超时，请稍后重试")
 
 
 @router.get("/market/breadth")
 async def market_breadth():
-    raw = await registry.get_smart_dashboard_data()
-    breadth = raw.get("market_breadth", {})
-    if not breadth or "error" in breadth:
-        raise HTTPException(status_code=503, detail="市场广度数据不可用")
-    return calc_breadth_ratio(
-        up_count=breadth.get("up_count", 0),
-        down_count=breadth.get("down_count", 0),
-        total=breadth.get("total", 0),
-    )
+    try:
+        raw = await _with_timeout(registry.get_smart_dashboard_data(), API_TIMEOUT)
+        breadth = raw.get("market_breadth", {})
+        if not breadth or "error" in breadth:
+            raise HTTPException(status_code=503, detail="市场广度数据不可用")
+        return calc_breadth_ratio(
+            up_count=breadth.get("up_count", 0),
+            down_count=breadth.get("down_count", 0),
+            total=breadth.get("total", 0),
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="请求超时，请稍后重试")
 
 
 @router.get("/sectors/top")
 async def sectors_top(limit: int = 10):
-    raw = await registry.get_smart_dashboard_data()
-    sectors = raw.get("top_sectors", [])
-    return {
-        "sectors": calc_sector_rotation(sectors, top_n=limit),
-        "heat": calc_sector_heat(sectors),
-    }
+    try:
+        raw = await _with_timeout(registry.get_smart_dashboard_data(), API_TIMEOUT)
+        sectors = raw.get("top_sectors", [])
+        return {
+            "sectors": calc_sector_rotation(sectors, top_n=limit),
+            "heat": calc_sector_heat(sectors),
+        }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="请求超时，请稍后重试")
 
 
 @router.get("/sectors/all")

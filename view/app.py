@@ -45,4 +45,4 @@ async def dashboard():
         return HTMLResponse(content=f.read())
 
 
-app.mount("/static", StaticFiles(directory="view/static"), name="static")
+app.mount("/static", StaticFiles(directory="view/static", html=True), name="static") if __import__("os").path.exists("view/static") else None

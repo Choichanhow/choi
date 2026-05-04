@@ -10,11 +10,9 @@
 import asyncio
 
 from data.sources.akshare_adapter import AKShareAdapter
-from data.sources.pytdx_adapter import PytdxAdapter
 
 ADAPTERS = {
     "akshare": AKShareAdapter(),
-    "pytdx": PytdxAdapter(),
 }
 
 DEFAULT_SOURCE = "akshare"

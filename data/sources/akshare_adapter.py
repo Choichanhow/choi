@@ -6,6 +6,8 @@ MANIFESTO IV: 鲁棒性预设 — 所有接口必须有降级处理
 优化点：
 1. 批量获取: 一次 HTTP 请求拉取全量指数，本地筛选，节省 2/3 请求
 2. 内存缓存: 板块数据 30s TTL，指数数据 5s TTL
+3. 并发安全: 使用 asyncio.Lock 防止竞态条件
+4. 超时保护: 市场广度获取设置 30s 超时，防止挂起
 """
 
 import asyncio
@@ -20,6 +22,8 @@ from config.settings import (
     INDEX_CODES, INDEX_TDX_MAP, FALLBACK_VALUES, ERROR_MESSAGE
 )
 
+BREADTH_TIMEOUT = 120.0
+
 
 class AKShareAdapter:
     name = "akshare"
@@ -32,6 +36,13 @@ class AKShareAdapter:
     _sector_cache: Optional[list] = None
     _sector_cache_time: float = 0
     SECTOR_CACHE_TTL: float = 30.0
+
+    _indices_lock: asyncio.Lock = None
+    _sector_lock: asyncio.Lock = None
+
+    def __init__(self):
+        self._indices_lock = asyncio.Lock()
+        self._sector_lock = asyncio.Lock()
 
     async def fetch_index_realtime(self, index_code: str) -> dict:
         df = await self._fetch_all_indices_cached()
@@ -62,22 +73,25 @@ class AKShareAdapter:
 
     async def _fetch_all_indices_cached(self) -> Optional[pd.DataFrame]:
         now = time.time()
-        if (
-            self._all_indices_df is not None
-            and (now - self._indices_cache_time) < self.INDICES_CACHE_TTL
-        ):
-            return self._all_indices_df
+        async with self._indices_lock:
+            if (
+                self._all_indices_df is not None
+                and (now - self._indices_cache_time) < self.INDICES_CACHE_TTL
+            ):
+                return self._all_indices_df
 
-        try:
-            df = await asyncio.to_thread(
-                ak.stock_zh_index_spot_em, symbol="沪深重要指数"
-            )
-            if df is not None and not df.empty:
-                self._all_indices_df = df
-                self._indices_cache_time = now
-            return df
-        except Exception:
-            return self._all_indices_df
+            try:
+                df = await asyncio.to_thread(
+                    ak.stock_zh_index_spot_em, symbol="沪深重要指数"
+                )
+                if df is not None and not df.empty:
+                    self._all_indices_df = df
+                    self._indices_cache_time = now
+                return df
+            except Exception as e:
+                import logging
+                logging.warning(f"AKShare指数获取失败: {type(e).__name__}, {str(e)}")
+                return self._all_indices_df
 
     async def fetch_all_indices(self) -> list[dict]:
         df = await self._fetch_all_indices_cached()
@@ -98,34 +112,37 @@ class AKShareAdapter:
 
     async def fetch_sector_list(self, use_cache: bool = True) -> list[dict]:
         now = time.time()
-        if use_cache and self._sector_cache and (now - self._sector_cache_time) < self.SECTOR_CACHE_TTL:
-            return self._sector_cache
+        async with self._sector_lock:
+            if use_cache and self._sector_cache and (now - self._sector_cache_time) < self.SECTOR_CACHE_TTL:
+                return self._sector_cache
 
-        try:
-            df = await asyncio.to_thread(ak.stock_board_industry_name_em)
-            if df is None or df.empty:
-                return []
-            result = []
-            for _, row in df.iterrows():
-                result.append({
-                    "source": self.name,
-                    "rank": safe_fetch(row, "排名", 0),
-                    "sector_name": safe_fetch(row, "板块名称", ERROR_MESSAGE),
-                    "sector_code": safe_fetch(row, "板块代码", ERROR_MESSAGE),
-                    "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
-                    "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
-                    "change_amount": safe_fetch(row, "涨跌额", 0.0),
-                    "up_count": safe_fetch(row, "上涨家数", 0),
-                    "down_count": safe_fetch(row, "下跌家数", 0),
-                    "lead_stock": safe_fetch(row, "领涨股票", ERROR_MESSAGE),
-                    "lead_change_pct": safe_fetch(row, "领涨股票-涨跌幅", FALLBACK_VALUES["change_pct"]),
-                })
+            try:
+                df = await asyncio.to_thread(ak.stock_board_industry_name_em)
+                if df is None or df.empty:
+                    return []
+                result = []
+                for _, row in df.iterrows():
+                    result.append({
+                        "source": self.name,
+                        "rank": safe_fetch(row, "排名", 0),
+                        "sector_name": safe_fetch(row, "板块名称", ERROR_MESSAGE),
+                        "sector_code": safe_fetch(row, "板块代码", ERROR_MESSAGE),
+                        "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                        "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                        "change_amount": safe_fetch(row, "涨跌额", 0.0),
+                        "up_count": safe_fetch(row, "上涨家数", 0),
+                        "down_count": safe_fetch(row, "下跌家数", 0),
+                        "lead_stock": safe_fetch(row, "领涨股票", ERROR_MESSAGE),
+                        "lead_change_pct": safe_fetch(row, "领涨股票-涨跌幅", FALLBACK_VALUES["change_pct"]),
+                    })
 
-            self._sector_cache = result
-            self._sector_cache_time = now
-            return result
-        except Exception as e:
-            return [{"error": True, "reason": f"AKSHARE_SECTOR_ERROR: {type(e).__name__}"}]
+                self._sector_cache = result
+                self._sector_cache_time = now
+                return result
+            except Exception as e:
+                import logging
+                logging.warning(f"AKShare板块获取失败: {type(e).__name__}, {str(e)}")
+                return [{"error": True, "reason": f"AKSHARE_SECTOR_ERROR: {type(e).__name__}"}]
 
     async def fetch_stock_realtime(self, stock_code: str) -> dict:
         try:
@@ -168,7 +185,10 @@ class AKShareAdapter:
 
     async def fetch_market_breadth(self) -> dict:
         try:
-            df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
+            df = await asyncio.wait_for(
+                asyncio.to_thread(ak.stock_zh_a_spot_em),
+                timeout=BREADTH_TIMEOUT
+            )
             if df is None or df.empty:
                 return {"error": True, "reason": "NO_DATA"}
 
@@ -185,7 +205,13 @@ class AKShareAdapter:
                 "total": total,
                 "ratio": round((up_count - down_count) / total * 100, 2) if total > 0 else 0,
             }
+        except asyncio.TimeoutError:
+            import logging
+            logging.warning(f"AKShare市场广度获取超时: {BREADTH_TIMEOUT}秒")
+            return {"error": True, "reason": "BREADTH_TIMEOUT"}
         except Exception as e:
+            import logging
+            logging.warning(f"AKShare市场广度获取失败: {type(e).__name__}, {str(e)}")
             return {"error": True, "reason": f"AKSHARE_BREADTH_ERROR: {type(e).__name__}"}
 
     async def fetch_all_dashboard_data(self) -> dict:
