@@ -6,6 +6,8 @@ MANIFESTO IV: 配置驱动 — 所有参数来自 config/
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 
 from config.settings import APP_TITLE, APP_VERSION, API_KEY
 from view.routers.market import router as market_router
@@ -35,3 +37,12 @@ async def health():
 @app.get("/api/key-status")
 async def key_status():
     return {"configured": bool(API_KEY)}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    with open("view/templates/index.html", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+app.mount("/static", StaticFiles(directory="view/static"), name="static")

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A-Share Market Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 16px 24px;
+            border-bottom: 1px solid #2a2a3e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #00d4ff;
+            letter-spacing: 2px;
+        }
+        .header .status {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: #888;
+        }
+        .status span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .status .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff88;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 16px;
+            padding: 16px;
+        }
+        .card {
+            background: linear-gradient(145deg, #14141f 0%, #0f0f1a 100%);
+            border: 1px solid #2a2a3e;
+            border-radius: 8px;
+            padding: 16px;
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            border-color: #00d4ff;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.1);
+        }
+        .card-header {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        
+        .span-3 { grid-column: span 3; }
+        .span-4 { grid-column: span 4; }
+        .span-6 { grid-column: span 6; }
+        .span-12 { grid-column: span 12; }
+        
+        .price {
+            font-size: 28px;
+            font-weight: 700;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+        .change-pct {
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            margin-top: 4px;
+        }
+        .change-pct.up { color: #ff4d4d; }
+        .change-pct.down { color: #2ecc71; }
+        .change-pct.flat { color: #888; }
+        
+        .breadth-box {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .breadth-item {
+            text-align: center;
+            padding: 8px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 4px;
+        }
+        .breadth-item .label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .breadth-item .value {
+            font-size: 16px;
+            font-family: 'Courier New', monospace;
+        }
+        .breadth-item.up .value { color: #ff4d4d; }
+        .breadth-item.down .value { color: #2ecc71; }
+        .breadth-item.ratio .value { color: #00d4ff; }
+        
+        .sentiment-bar {
+            height: 4px;
+            background: #1a1a2e;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .sentiment-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+        .sentiment-fill.bull { background: linear-gradient(90deg, #ff4d4d, #ff884d); }
+        .sentiment-fill.bear { background: linear-gradient(90deg, #2ecc71, #4dff88); }
+        .sentiment-fill.neutral { background: #666; }
+        
+        .sector-list {
+            list-style: none;
+            margin-top: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .sector-list::-webkit-scrollbar { width: 4px; }
+        .sector-list::-webkit-scrollbar-track { background: #14141f; }
+        .sector-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+        
+        .sector-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 12px;
+        }
+        .sector-item:last-child { border-bottom: none; }
+        .sector-name { flex: 1; color: #aaa; }
+        .sector-change { font-family: 'Courier New', monospace; }
+        .sector-change.up { color: #ff4d4d; }
+        .sector-change.down { color: #2ecc71; }
+        
+        .intensity-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .intensity-badge.bull { background: rgba(255,77,77,0.15); color: #ff4d4d; }
+        .intensity-badge.bear { background: rgba(46,204,113,0.15); color: #2ecc71; }
+        .intensity-badge.neutral { background: rgba(136,136,136,0.15); color: #888; }
+        .intensity-badge.divergence { background: rgba(255,192,0,0.15); color: #ffc000; }
+        
+        .heat-gauge {
+            width: 100%;
+            height: 20px;
+            background: #1a1a2e;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .heat-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        .heat-fill.hot { background: linear-gradient(90deg, #ff4d4d, #ff884d); }
+        .heat-fill.warm { background: linear-gradient(90deg, #ff884d, #ffc000); }
+        .heat-fill.cool { background: linear-gradient(90deg, #00d4ff, #2ecc71); }
+        .heat-fill.cold { background: #666; }
+        
+        .composite-box {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-top: 12px;
+        }
+        .composite-value {
+            font-size: 24px;
+            font-family: 'Courier New', monospace;
+            color: #00d4ff;
+        }
+        
+        .update-time {
+            font-size: 10px;
+            color: #555;
+            text-align: center;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>A-SHARE MARKET DASHBOARD</h1>
+        <div class="status">
+            <span><span class="dot"></span> LIVE</span>
+            <span id="update-time">--:--:--</span>
+        </div>
+    </div>
+    
+    <div class="grid">
+        <div class="card span-4">
+            <div class="card-header">上证指数</div>
+            <div class="price" id="sh-price">--</div>
+            <div class="change-pct" id="sh-change">--%</div>
+        </div>
+        <div class="card span-4">
+            <div class="card-header">深证成指</div>
+            <div class="price" id="sz-price">--</div>
+            <div class="change-pct" id="sz-change">--%</div>
+        </div>
+        <div class="card span-4">
+            <div class="card-header">创业板指</div>
+            <div class="price" id="cy-price">--</div>
+            <div class="change-pct" id="cy-change">--%</div>
+        </div>
+        
+        <div class="card span-6">
+            <div class="card-header">市场广度</div>
+            <div class="breadth-box">
+                <div class="breadth-item up">
+                    <div class="label">上涨</div>
+                    <div class="value" id="breadth-up">--</div>
+                </div>
+                <div class="breadth-item down">
+                    <div class="label">下跌</div>
+                    <div class="value" id="breadth-down">--</div>
+                </div>
+                <div class="breadth-item ratio">
+                    <div class="label">差值%</div>
+                    <div class="value" id="breadth-ratio">--</div>
+                </div>
+            </div>
+            <div id="breadth-label" class="intensity-badge neutral" style="margin-top: 12px;">--</div>
+        </div>
+        
+        <div class="card span-6">
+            <div class="card-header">市场情绪</div>
+            <div class="composite-box">
+                <div>
+                    <div class="label" style="font-size:10px;color:#666;">情绪指数</div>
+                    <div class="composite-value" id="sentiment-index">--</div>
+                </div>
+                <div style="flex:1;">
+                    <div class="label" style="font-size:10px;color:#666;">强度</div>
+                    <div class="sentiment-bar">
+                        <div class="sentiment-fill" id="sentiment-bar" style="width: 50%;"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="sentiment-label" class="intensity-badge neutral" style="margin-top: 8px;">--</div>
+        </div>
+        
+        <div class="card span-6">
+            <div class="card-header">板块热度</div>
+            <div class="heat-gauge">
+                <div class="heat-fill" id="heat-fill" style="width: 50%;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 8px;">
+                <span style="font-size:12px;color:#666;">冷清</span>
+                <span class="intensity-badge neutral" id="heat-label">--</span>
+                <span style="font-size:12px;color:#666;">极度活跃</span>
+            </div>
+        </div>
+        
+        <div class="card span-6">
+            <div class="card-header">综合强度</div>
+            <div id="intensity-overall" class="intensity-badge neutral" style="font-size:14px;padding:8px 20px;">--</div>
+            <div style="margin-top: 12px;">
+                <div style="font-size:10px;color:#666;margin-bottom:4px;">广度信号</div>
+                <div id="intensity-breadth" class="intensity-badge neutral">--</div>
+            </div>
+            <div style="margin-top: 8px;">
+                <div style="font-size:10px;color:#666;margin-bottom:4px;">板块信号</div>
+                <div id="intensity-sector" class="intensity-badge neutral">--</div>
+            </div>
+        </div>
+        
+        <div class="card span-12">
+            <div class="card-header">板块轮动 TOP 10</div>
+            <ul class="sector-list" id="sector-list">
+                <li class="sector-item"><span class="sector-name">--</span><span class="sector-change">--</span></li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        async function fetchData() {
+            try {
+                const res = await fetch('/api/market/overview');
+                const data = await res.json();
+                updateUI(data);
+            } catch (e) {
+                console.error('Fetch error:', e);
+            }
+        }
+
+        function updateUI(data) {
+            const indices = data.indices || {};
+            updateIndex('sh', indices.shanghai);
+            updateIndex('sz', indices.shenzhen);
+            updateIndex('cy', indices.chinext);
+
+            const breadth = data.market_breadth || {};
+            document.getElementById('breadth-up').textContent = breadth.up_count || '--';
+            document.getElementById('breadth-down').textContent = breadth.down_count || '--';
+            document.getElementById('breadth-ratio').textContent = breadth.ratio ? `${breadth.ratio}%` : '--';
+            updateBadge('breadth-label', breadth.signal, breadth.label);
+
+            const sentiment = data.sentiment || {};
+            document.getElementById('sentiment-index').textContent = sentiment.index ? `${sentiment.index}%` : '--';
+            document.getElementById('sentiment-bar').style.width = `${sentiment.index || 50}%`;
+            document.getElementById('sentiment-bar').className = `sentiment-fill ${getSentimentClass(sentiment.signal)}`;
+            updateBadge('sentiment-label', sentiment.signal, sentiment.label);
+
+            const heat = data.sector_heat || {};
+            document.getElementById('heat-fill').style.width = `${heat.heat_score || 50}%`;
+            document.getElementById('heat-fill').className = `heat-fill ${getHeatClass(heat.heat_score)}`;
+            updateBadge('heat-label', heat.signal, heat.label);
+
+            const intensity = data.market_intensity || {};
+            updateBadge('intensity-overall', intensity.signal, intensity.overall);
+            updateBadge('intensity-breadth', intensity.breadth_signal, intensity.breadth_label);
+            updateBadge('intensity-sector', intensity.sector_heat_signal, intensity.sector_heat_label);
+
+            const rotation = data.sector_rotation || [];
+            const sectorList = document.getElementById('sector-list');
+            sectorList.innerHTML = rotation.map(s => `
+                <li class="sector-item">
+                    <span class="sector-name">${s.rank}. ${s.sector_name}</span>
+                    <span class="sector-change ${s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : ''}">${s.change_pct > 0 ? '+' : ''}${s.change_pct}%</span>
+                </li>
+            `).join('');
+
+            document.getElementById('update-time').textContent = data.timestamp || '--:--:--';
+        }
+
+        function updateIndex(prefix, data) {
+            if (!data) return;
+            document.getElementById(`${prefix}-price`).textContent = data.price || '--';
+            const change = document.getElementById(`${prefix}-change`);
+            change.textContent = data.change_pct ? `${data.change_pct > 0 ? '+' : ''}${data.change_pct}%` : '--';
+            change.className = `change-pct ${data.change_pct > 0 ? 'up' : data.change_pct < 0 ? 'down' : 'flat'}`;
+        }
+
+        function updateBadge(id, signal, label) {
+            const badge = document.getElementById(id);
+            badge.textContent = label || '--';
+            badge.className = `intensity-badge ${getBadgeClass(signal)}`;
+        }
+
+        function getBadgeClass(signal) {
+            if (!signal) return 'neutral';
+            if (signal.includes('BULL') && !signal.includes('EXTREME')) return 'bull';
+            if (signal.includes('BEAR') && !signal.includes('EXTREME')) return 'bear';
+            if (signal.includes('DIVERGENCE')) return 'divergence';
+            return 'neutral';
+        }
+
+        function getSentimentClass(signal) {
+            if (!signal) return 'neutral';
+            if (signal.includes('BULL')) return 'bull';
+            if (signal.includes('BEAR')) return 'bear';
+            return 'neutral';
+        }
+
+        function getHeatClass(score) {
+            if (!score) return 'cold';
+            if (score >= 70) return 'hot';
+            if (score >= 45) return 'warm';
+            if (score >= 30) return 'cool';
+            return 'cold';
+        }
+
+        fetchData();
+        setInterval(fetchData, 30000);
+    </script>
+</body>
+</html>
