@@ -216,20 +216,35 @@
     </div>
     
     <div class="grid">
-        <div class="card span-4">
+        <div class="card span-3">
             <div class="card-header">上证指数</div>
             <div class="price" id="sh-price">--</div>
             <div class="change-pct" id="sh-change">--%</div>
         </div>
-        <div class="card span-4">
+        <div class="card span-3">
             <div class="card-header">深证成指</div>
             <div class="price" id="sz-price">--</div>
             <div class="change-pct" id="sz-change">--%</div>
         </div>
-        <div class="card span-4">
+        <div class="card span-3">
             <div class="card-header">创业板指</div>
             <div class="price" id="cy-price">--</div>
             <div class="change-pct" id="cy-change">--%</div>
+        </div>
+        <div class="card span-3">
+            <div class="card-header">科创50</div>
+            <div class="price" id="star-price">--</div>
+            <div class="change-pct" id="star-change">--%</div>
+        </div>
+        <div class="card span-3">
+            <div class="card-header">科创综指</div>
+            <div class="price" id="star-com-price">--</div>
+            <div class="change-pct" id="star-com-change">--%</div>
+        </div>
+        <div class="card span-3">
+            <div class="card-header">中证全指</div>
+            <div class="price" id="csi-price">--</div>
+            <div class="change-pct" id="csi-change">--%</div>
         </div>
         
         <div class="card span-6">
@@ -317,6 +332,9 @@
             updateIndex('sh', indices.shanghai);
             updateIndex('sz', indices.shenzhen);
             updateIndex('cy', indices.chinext);
+            updateIndex('star', indices.star_50);
+            updateIndex('star-com', indices.star_composite);
+            updateIndex('csi', indices.csi_all);
 
             const breadth = data.market_breadth || {};
             document.getElementById('breadth-up').textContent = breadth.up_count || '--';

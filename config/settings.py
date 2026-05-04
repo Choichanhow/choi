@@ -23,6 +23,8 @@ INDEX_CODES = {
     "shenzhen": "399001",
     "chinext": "399006",
     "star_50": "000688",
+    "star_composite": "000680",
+    "csi_all": "000985",
 }
 
 INDEX_TDX_MAP = {
@@ -30,6 +32,8 @@ INDEX_TDX_MAP = {
     "shenzhen": (0, "399001"),
     "chinext": (0, "399006"),
     "star_50": (0, "000688"),
+    "star_composite": (0, "000680"),
+    "csi_all": (0, "000985"),
 }
 
 PYTDX_BEST_SERVER = ("218.106.92.183", 7709)

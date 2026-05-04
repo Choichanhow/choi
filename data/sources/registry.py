@@ -2,15 +2,12 @@
 数据源注册中心 — A-Share Market Dashboard
 提供统一的获取接口，支持 AKShare / Pytdx 双数据源智能切换
 
-智能路由策略：
-- 指数实时行情: Pytdx (17ms) 优先，AKShare (1s) 作为 fallback
-- 板块列表/市场广度: 仅 AKShare 支持（Pytdx 无此接口）
-- 涨停池: 仅 AKShare 支持（Pytdx 无此接口）
-- 个股行情: AKShare（HTTP接口更稳定），Pytdx 作为备用
+智能路由策略（修复版）：
+- Pytdx 暂时禁用（数据解析问题）
+- 所有数据使用 AKShare（数据准确）
 """
 
 import asyncio
-from typing import Literal
 
 from data.sources.akshare_adapter import AKShareAdapter
 from data.sources.pytdx_adapter import PytdxAdapter
@@ -20,9 +17,9 @@ ADAPTERS = {
     "pytdx": PytdxAdapter(),
 }
 
-DEFAULT_SOURCE: Literal["akshare", "pytdx"] = "akshare"
+DEFAULT_SOURCE = "akshare"
 
-PYTDX_ENABLED = True
+PYTDX_ENABLED = False
 
 
 def get_adapter(source: str = DEFAULT_SOURCE):
@@ -62,20 +59,8 @@ async def fetch_all_dashboard_data(source: str = DEFAULT_SOURCE) -> dict:
     return await adapter.fetch_all_dashboard_data()
 
 
-import asyncio
-
-
 async def get_best_index_data(index_code: str) -> dict:
-    if PYTDX_ENABLED:
-        try:
-            pytdx_result = await ADAPTERS["pytdx"].fetch_index_realtime(index_code)
-            if "error" not in pytdx_result:
-                return pytdx_result
-        except Exception:
-            pass
-
-    akshare_result = await ADAPTERS["akshare"].fetch_index_realtime(index_code)
-    return akshare_result
+    return await ADAPTERS["akshare"].fetch_index_realtime(index_code)
 
 
 async def get_smart_dashboard_data() -> dict:
@@ -85,8 +70,11 @@ async def get_smart_dashboard_data() -> dict:
         get_best_index_data("shanghai"),
         get_best_index_data("shenzhen"),
         get_best_index_data("chinext"),
+        get_best_index_data("star_50"),
+        get_best_index_data("star_composite"),
+        get_best_index_data("csi_all"),
     ]
-    sh, sz, cy = await asyncio.gather(*index_tasks, return_exceptions=True)
+    sh, sz, cy, star, star_com, csi_all = await asyncio.gather(*index_tasks, return_exceptions=True)
 
     breadth = await akshare_adapter.fetch_market_breadth()
     sectors = await akshare_adapter.fetch_sector_list()
@@ -102,6 +90,9 @@ async def get_smart_dashboard_data() -> dict:
             "shanghai": sh if not isinstance(sh, Exception) else {"error": True},
             "shenzhen": sz if not isinstance(sz, Exception) else {"error": True},
             "chinext": cy if not isinstance(cy, Exception) else {"error": True},
+            "star_50": star if not isinstance(star, Exception) else {"error": True},
+            "star_composite": star_com if not isinstance(star_com, Exception) else {"error": True},
+            "csi_all": csi_all if not isinstance(csi_all, Exception) else {"error": True},
         },
         "market_breadth": breadth,
         "top_sectors": top_sectors,

@@ -167,22 +167,26 @@ class AKShareAdapter:
             return [{"error": True, "reason": f"AKSHARE_ZT_ERROR: {type(e).__name__}"}]
 
     async def fetch_market_breadth(self) -> dict:
-        sectors = await self.fetch_sector_list()
-        if not sectors or "error" in sectors[0]:
-            return {"error": True, "reason": sectors[0].get("reason") if sectors else "NO_DATA"}
+        try:
+            df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
+            if df is None or df.empty:
+                return {"error": True, "reason": "NO_DATA"}
 
-        total_up = sum(s.get("up_count", 0) or 0 for s in sectors)
-        total_down = sum(s.get("down_count", 0) or 0 for s in sectors)
-        total = total_up + total_down
+            up_count = len(df[df["涨跌幅"] > 0])
+            down_count = len(df[df["涨跌幅"] < 0])
+            flat_count = len(df[df["涨跌幅"] == 0])
+            total = len(df)
 
-        return {
-            "source": self.name,
-            "up_count": total_up,
-            "down_count": total_down,
-            "flat_count": 0,
-            "total": total,
-            "ratio": round((total_up - total_down) / total * 100, 2) if total > 0 else 0,
-        }
+            return {
+                "source": self.name,
+                "up_count": up_count,
+                "down_count": down_count,
+                "flat_count": flat_count,
+                "total": total,
+                "ratio": round((up_count - down_count) / total * 100, 2) if total > 0 else 0,
+            }
+        except Exception as e:
+            return {"error": True, "reason": f"AKSHARE_BREADTH_ERROR: {type(e).__name__}"}
 
     async def fetch_all_dashboard_data(self) -> dict:
         index_tasks = [
