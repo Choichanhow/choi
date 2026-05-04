@@ -1,0 +1,174 @@
+"""
+AKShare 数据源适配器 — A-Share Market Dashboard
+MANIFESTO II: 数据原子化 — 只负责"拿"，不负责"算"
+MANIFESTO IV: 鲁棒性预设 — 所有接口必须有降级处理
+"""
+
+import asyncio
+from typing import Optional
+
+import akshare as ak
+import pandas as pd
+
+from data.fetcher import safe_fetch, format_error_response
+from config.settings import INDEX_CODES, FALLBACK_VALUES, ERROR_MESSAGE
+
+
+INDEX_NAME_MAP = {
+    "shanghai": "000001",
+    "shenzhen": "399001",
+    "chinext": "399006",
+    "star_50": "000688",
+}
+
+
+class AKShareAdapter:
+    name = "akshare"
+    supported_index_codes = INDEX_CODES
+
+    async def fetch_index_realtime(self, index_code: str) -> dict:
+        try:
+            df = await asyncio.to_thread(
+                ak.stock_zh_index_spot_em, symbol="沪深重要指数"
+            )
+            if df is None or df.empty:
+                return format_error_response("AKSHARE_NO_DATA")
+
+            code = INDEX_NAME_MAP.get(index_code, index_code)
+            row = df[df["代码"] == code]
+            if row.empty:
+                return format_error_response(f"AKSHARE_INDEX_NOT_FOUND: {index_code}")
+
+            row = row.iloc[0]
+            return {
+                "source": self.name,
+                "index_code": index_code,
+                "code": safe_fetch(row, "代码", ERROR_MESSAGE),
+                "name": safe_fetch(row, "名称", "未知"),
+                "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                "change_amount": safe_fetch(row, "涨跌额", 0.0),
+                "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
+                "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
+                "open": safe_fetch(row, "今开", 0.0),
+                "high": safe_fetch(row, "最高", 0.0),
+                "low": safe_fetch(row, "最低", 0.0),
+                "prev_close": safe_fetch(row, "昨收", 0.0),
+            }
+        except Exception as e:
+            return format_error_response(f"AKSHARE_ERROR: {type(e).__name__}")
+
+    async def fetch_all_indices(self) -> list[dict]:
+        try:
+            df = await asyncio.to_thread(
+                ak.stock_zh_index_spot_em, symbol="沪深重要指数"
+            )
+            if df is None or df.empty:
+                return []
+            result = []
+            for _, row in df.iterrows():
+                result.append({
+                    "source": self.name,
+                    "code": safe_fetch(row, "代码", ERROR_MESSAGE),
+                    "name": safe_fetch(row, "名称", ERROR_MESSAGE),
+                    "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                    "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                    "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
+                    "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
+                })
+            return result
+        except Exception as e:
+            return [{"error": True, "reason": f"AKSHARE_ALL_INDICES_ERROR: {type(e).__name__}"}]
+
+    async def fetch_sector_list(self) -> list[dict]:
+        try:
+            df = await asyncio.to_thread(ak.stock_board_industry_name_em)
+            if df is None or df.empty:
+                return []
+            result = []
+            for _, row in df.iterrows():
+                result.append({
+                    "source": self.name,
+                    "rank": safe_fetch(row, "排名", 0),
+                    "sector_name": safe_fetch(row, "板块名称", ERROR_MESSAGE),
+                    "sector_code": safe_fetch(row, "板块代码", ERROR_MESSAGE),
+                    "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                    "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                    "change_amount": safe_fetch(row, "涨跌额", 0.0),
+                    "up_count": safe_fetch(row, "上涨家数", 0),
+                    "down_count": safe_fetch(row, "下跌家数", 0),
+                    "lead_stock": safe_fetch(row, "领涨股票", ERROR_MESSAGE),
+                    "lead_change_pct": safe_fetch(row, "领涨股票-涨跌幅", FALLBACK_VALUES["change_pct"]),
+                })
+            return result
+        except Exception as e:
+            return [{"error": True, "reason": f"AKSHARE_SECTOR_ERROR: {type(e).__name__}"}]
+
+    async def fetch_stock_realtime(self, stock_code: str) -> dict:
+        try:
+            df = await asyncio.to_thread(
+                ak.stock_zh_a_spot_em, symbol=stock_code
+            )
+            if df is None or df.empty:
+                return format_error_response("AKSHARE_STOCK_NO_DATA")
+            row = df.iloc[0]
+            return {
+                "source": self.name,
+                "code": stock_code,
+                "name": safe_fetch(row, "名称", ERROR_MESSAGE),
+                "price": safe_fetch(row, "最新价", FALLBACK_VALUES["price"]),
+                "change_pct": safe_fetch(row, "涨跌幅", FALLBACK_VALUES["change_pct"]),
+                "volume": safe_fetch(row, "成交量", FALLBACK_VALUES["volume"]),
+                "amount": safe_fetch(row, "成交额", FALLBACK_VALUES["amount"]),
+            }
+        except Exception as e:
+            return format_error_response(f"AKSHARE_STOCK_ERROR: {type(e).__name__}")
+
+    async def fetch_zt_pool(self) -> list[dict]:
+        try:
+            df = await asyncio.to_thread(ak.stock_zt_pool_em)
+            if df is None or df.empty:
+                return []
+            result = []
+            for _, row in df.head(20).iterrows():
+                result.append({
+                    "source": self.name,
+                    "code": safe_fetch(row, "代码", ERROR_MESSAGE),
+                    "name": safe_fetch(row, "名称", ERROR_MESSAGE),
+                    "close": safe_fetch(row, "最新价", 0.0),
+                    "change_pct": safe_fetch(row, "涨停统计", 0.0),
+                    "turnover_rate": safe_fetch(row, "换手率", 0.0),
+                })
+            return result
+        except Exception as e:
+            return [{"error": True, "reason": f"AKSHARE_ZT_ERROR: {type(e).__name__}"}]
+
+    async def fetch_market_breadth(self) -> dict:
+        try:
+            df = await asyncio.to_thread(ak.stock_board_industry_name_em)
+            if df is None or df.empty:
+                return {"error": True, "reason": "NO_DATA"}
+
+            total_up = int(df["上涨家数"].sum())
+            total_down = int(df["下跌家数"].sum())
+            total = total_up + total_down
+
+            return {
+                "source": self.name,
+                "up_count": total_up,
+                "down_count": total_down,
+                "flat_count": 0,
+                "total": total,
+                "ratio": round((total_up - total_down) / total * 100, 2) if total > 0 else 0,
+            }
+        except Exception as e:
+            return {"error": True, "reason": f"AKSHARE_BREADTH_ERROR: {type(e).__name__}"}
+
+    async def health_check(self) -> bool:
+        try:
+            await asyncio.to_thread(
+                ak.stock_zh_index_spot_em, symbol="沪深重要指数"
+            )
+            return True
+        except Exception:
+            return False
