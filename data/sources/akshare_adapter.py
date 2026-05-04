@@ -5,6 +5,7 @@ MANIFESTO IV: 鲁棒性预设 — 所有接口必须有降级处理
 """
 
 import asyncio
+import time
 from typing import Optional
 
 import akshare as ak
@@ -25,6 +26,10 @@ INDEX_NAME_MAP = {
 class AKShareAdapter:
     name = "akshare"
     supported_index_codes = INDEX_CODES
+
+    _sector_cache: Optional[dict] = None
+    _sector_cache_time: float = 0
+    CACHE_TTL_SECONDS: float = 30.0
 
     async def fetch_index_realtime(self, index_code: str) -> dict:
         try:
@@ -80,7 +85,11 @@ class AKShareAdapter:
         except Exception as e:
             return [{"error": True, "reason": f"AKSHARE_ALL_INDICES_ERROR: {type(e).__name__}"}]
 
-    async def fetch_sector_list(self) -> list[dict]:
+    async def fetch_sector_list(self, use_cache: bool = True) -> list[dict]:
+        now = time.time()
+        if use_cache and self._sector_cache and (now - self._sector_cache_time) < self.CACHE_TTL_SECONDS:
+            return self._sector_cache
+
         try:
             df = await asyncio.to_thread(ak.stock_board_industry_name_em)
             if df is None or df.empty:
@@ -100,6 +109,9 @@ class AKShareAdapter:
                     "lead_stock": safe_fetch(row, "领涨股票", ERROR_MESSAGE),
                     "lead_change_pct": safe_fetch(row, "领涨股票-涨跌幅", FALLBACK_VALUES["change_pct"]),
                 })
+
+            self._sector_cache = result
+            self._sector_cache_time = now
             return result
         except Exception as e:
             return [{"error": True, "reason": f"AKSHARE_SECTOR_ERROR: {type(e).__name__}"}]
@@ -144,25 +156,49 @@ class AKShareAdapter:
             return [{"error": True, "reason": f"AKSHARE_ZT_ERROR: {type(e).__name__}"}]
 
     async def fetch_market_breadth(self) -> dict:
-        try:
-            df = await asyncio.to_thread(ak.stock_board_industry_name_em)
-            if df is None or df.empty:
-                return {"error": True, "reason": "NO_DATA"}
+        sectors = await self.fetch_sector_list()
+        if not sectors or "error" in sectors[0]:
+            return {"error": True, "reason": sectors[0].get("reason") if sectors else "NO_DATA"}
 
-            total_up = int(df["上涨家数"].sum())
-            total_down = int(df["下跌家数"].sum())
-            total = total_up + total_down
+        total_up = sum(s.get("up_count", 0) or 0 for s in sectors)
+        total_down = sum(s.get("down_count", 0) or 0 for s in sectors)
+        total = total_up + total_down
 
-            return {
-                "source": self.name,
-                "up_count": total_up,
-                "down_count": total_down,
-                "flat_count": 0,
-                "total": total,
-                "ratio": round((total_up - total_down) / total * 100, 2) if total > 0 else 0,
-            }
-        except Exception as e:
-            return {"error": True, "reason": f"AKSHARE_BREADTH_ERROR: {type(e).__name__}"}
+        return {
+            "source": self.name,
+            "up_count": total_up,
+            "down_count": total_down,
+            "flat_count": 0,
+            "total": total,
+            "ratio": round((total_up - total_down) / total * 100, 2) if total > 0 else 0,
+        }
+
+    async def fetch_all_dashboard_data(self) -> dict:
+        index_tasks = [
+            self.fetch_index_realtime("shanghai"),
+            self.fetch_index_realtime("shenzhen"),
+            self.fetch_index_realtime("chinext"),
+        ]
+        sh, sz, cy = await asyncio.gather(*index_tasks, return_exceptions=True)
+
+        breadth = await self.fetch_market_breadth()
+        sectors = await self.fetch_sector_list()
+
+        top_sectors = sorted(
+            [s for s in sectors if "error" not in s],
+            key=lambda x: x.get("change_pct", 0) or 0,
+            reverse=True
+        )[:10]
+
+        return {
+            "indices": {
+                "shanghai": sh if not isinstance(sh, Exception) else format_error_response("SH_ERROR"),
+                "shenzhen": sz if not isinstance(sz, Exception) else format_error_response("SZ_ERROR"),
+                "chinext": cy if not isinstance(cy, Exception) else format_error_response("CY_ERROR"),
+            },
+            "market_breadth": breadth,
+            "top_sectors": top_sectors,
+        }
 
     async def health_check(self) -> bool:
         try:
