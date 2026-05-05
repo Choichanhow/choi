@@ -463,10 +463,10 @@
 
     <script>
         const loaderSteps = {
-            init: { el: 'step-init', progress: 10 },
-            indices: { el: 'step-indices', progress: 30 },
-            breadth: { el: 'step-breadth', progress: 70 },
-            sectors: { el: 'step-sectors', progress: 90 },
+            init: { el: 'step-init', progress: 15 },
+            indices: { el: 'step-indices', progress: 40 },
+            sectors: { el: 'step-sectors', progress: 60 },
+            breadth: { el: 'step-breadth', progress: 95 },
             done: { el: 'step-done', progress: 100 }
         };
 
@@ -508,37 +508,140 @@
             }, 500);
         }
 
+        async function fetchWithTimeout(url, timeout = 30000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+            try {
+                const res = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return await res.json();
+            } catch (e) {
+                clearTimeout(timeoutId);
+                throw e;
+            }
+        }
+
         async function fetchData() {
             loadStartTime = Date.now();
             updateLoaderStep('init');
 
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 240000);
+            const fullData = {
+                indices: {},
+                market_breadth: {},
+                sentiment: {},
+                sector_heat: {},
+                sector_rotation: [],
+                market_intensity: {}
+            };
 
+            try {
+                updateLoaderStep('indices');
+                const indicesData = await fetchWithTimeout('/api/indices/fast', 15000);
+                fullData.indices = indicesData;
+                updateUIIndices(indicesData);
                 updateLoaderStep('indices');
 
-                const res = await fetch('/api/market/overview', {
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-
-                if (!res.ok) {
-                    throw new Error(`HTTP error! status: ${res.status}`);
-                }
-
-                const data = await res.json();
-
                 updateLoaderStep('sectors');
-                updateLoaderStep('done');
+                const sectorsData = await fetchWithTimeout('/api/sectors/async', 30000);
+                fullData.sector_rotation = sectorsData.sectors || [];
+                fullData.sector_heat = sectorsData.heat || {};
+                updateUISectors(sectorsData);
+                updateLoaderStep('sectors');
 
-                updateUI(data);
+                updateLoaderStep('breadth');
+                const breadthData = await fetchWithTimeout('/api/breadth/async', 120000);
+                fullData.market_breadth = breadthData;
+                updateUIBreadth(breadthData);
+                updateLoaderStep('breadth');
+
+                updateSentiment(breadthData);
+                updateMarketIntensity(breadthData, sectorsData.heat || {});
+
                 hideLoader();
             } catch (e) {
                 console.error('Fetch error:', e);
                 document.getElementById('eta').textContent = '加载失败，请刷新重试';
             }
+        }
+
+        function updateUIIndices(indices) {
+            updateIndex('sh', indices.shanghai);
+            updateIndex('sz', indices.shenzhen);
+            updateIndex('cy', indices.chinext);
+            updateIndex('star', indices.star_50);
+            updateIndex('star-com', indices.star_composite);
+            updateIndex('csi', indices.csi_all);
+        }
+
+        function updateUIBreadth(breadth) {
+            document.getElementById('breadth-up').textContent = breadth.up_count || '--';
+            document.getElementById('breadth-down').textContent = breadth.down_count || '--';
+            document.getElementById('breadth-ratio').textContent = breadth.ratio ? `${breadth.ratio}%` : '--';
+            updateBadge('breadth-label', breadth.signal, breadth.label);
+        }
+
+        function updateUISectors(sectorsData) {
+            const rotation = sectorsData.sectors || [];
+            const sectorList = document.getElementById('sector-list');
+            sectorList.innerHTML = rotation.map(s => `
+                <li class="sector-item">
+                    <span class="sector-name">${s.rank}. ${s.sector_name}</span>
+                    <span class="sector-change ${s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : ''}">${s.change_pct > 0 ? '+' : ''}${s.change_pct}%</span>
+                </li>
+            `).join('');
+
+            const heat = sectorsData.heat || {};
+            document.getElementById('heat-fill').style.width = `${heat.heat_score || 50}%`;
+            document.getElementById('heat-fill').className = `heat-fill ${getHeatClass(heat.heat_score)}`;
+            updateBadge('heat-label', heat.signal, heat.label);
+        }
+
+        function updateSentiment(breadth) {
+            const upCount = breadth.up_count || 0;
+            const total = breadth.total || 1;
+            const index = Math.round(upCount / total * 100 * 100) / 100;
+            let label = '无法判断';
+            let signal = 'NEUTRAL';
+            if (index >= 70) { label = '极度乐观'; signal = 'EXTREME_BULL'; }
+            else if (index >= 60) { label = '乐观'; signal = 'BULL'; }
+            else if (index >= 45) { label = '中性偏多'; signal = 'SLIGHT_BULL'; }
+            else if (index >= 40) { label = '中性偏空'; signal = 'SLIGHT_BEAR'; }
+            else if (index >= 30) { label = '悲观'; signal = 'BEAR'; }
+            else { label = '极度悲观'; signal = 'EXTREME_BEAR'; }
+
+            document.getElementById('sentiment-index').textContent = `${index}%`;
+            document.getElementById('sentiment-bar').style.width = `${index}%`;
+            document.getElementById('sentiment-bar').className = `sentiment-fill ${getSentimentClass(signal)}`;
+            updateBadge('sentiment-label', signal, label);
+        }
+
+        function updateMarketIntensity(breadth, sectorHeat) {
+            const breadthSignal = breadth.signal || 'NEUTRAL';
+            const sectorSignal = sectorHeat.signal || 'NEUTRAL';
+            let overall = '观望';
+            let signal = 'NEUTRAL';
+
+            if (breadthSignal === 'EXTREME_BULL' && sectorSignal === 'EXTREME_BULL') {
+                overall = '极强做多';
+                signal = 'STRONG_BULL';
+            } else if (breadthSignal === sectorSignal && (breadthSignal === 'BULL' || breadthSignal === 'EXTREME_BULL')) {
+                overall = '做多';
+                signal = 'BULL';
+            } else if (breadthSignal === sectorSignal && (breadthSignal === 'BEAR' || breadthSignal === 'EXTREME_BEAR')) {
+                overall = '做空';
+                signal = 'BEAR';
+            } else if (breadthSignal === 'NEUTRAL' || sectorSignal === 'NEUTRAL') {
+                overall = '观望';
+                signal = 'NEUTRAL';
+            } else {
+                overall = '分歧';
+                signal = 'DIVERGENCE';
+            }
+
+            updateBadge('intensity-overall', signal, overall);
+            updateBadge('intensity-breadth', breadthSignal, breadth.label || '--');
+            updateBadge('intensity-sector', sectorSignal, sectorHeat.label || '--');
         }
 
         function updateUI(data) {

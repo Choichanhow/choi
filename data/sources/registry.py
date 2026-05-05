@@ -95,3 +95,37 @@ async def get_smart_dashboard_data() -> dict:
         "market_breadth": breadth,
         "top_sectors": top_sectors,
     }
+
+
+async def get_fast_indices_data() -> dict:
+    index_tasks = [
+        get_best_index_data("shanghai"),
+        get_best_index_data("shenzhen"),
+        get_best_index_data("chinext"),
+        get_best_index_data("star_50"),
+        get_best_index_data("star_composite"),
+        get_best_index_data("csi_all"),
+    ]
+    results = await asyncio.gather(*index_tasks, return_exceptions=True)
+
+    index_keys = ["shanghai", "shenzhen", "chinext", "star_50", "star_composite", "csi_all"]
+    indices = {}
+    for i, r in enumerate(results):
+        key = index_keys[i]
+        indices[key] = r if not isinstance(r, Exception) else {"error": True}
+
+    return {"indices": indices}
+
+
+async def get_breadth_data() -> dict:
+    return await ADAPTERS["akshare"].fetch_market_breadth()
+
+
+async def get_sectors_data() -> dict:
+    sectors = await ADAPTERS["akshare"].fetch_sector_list()
+    top_sectors = sorted(
+        [s for s in sectors if "error" not in s],
+        key=lambda x: x.get("change_pct", 0) or 0,
+        reverse=True
+    )[:10]
+    return {"top_sectors": top_sectors}
