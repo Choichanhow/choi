@@ -1,23 +1,33 @@
 """
 数据源注册中心 — A-Share Market Dashboard
-提供统一的获取接口，支持 AKShare / Pytdx 双数据源智能切换
+提供统一的获取接口，支持多数据源智能切换
 
-智能路由策略（修复版）：
-- Pytdx 暂时禁用（数据解析问题）
-- 所有数据使用 AKShare（数据准确）
+支持的数权策略：
+- akshare: AKShare（默认，无需Token）
+- tushare: Tushare（需要Token）
+- mysql: MySQL本地库（需要配置）
+- postgresql: PostgreSQL本地库（需要配置）
+
+优先使用顺序：
+1. 如果配置了本地数据库（MySQL/PostgreSQL），优先使用（最低延迟）
+2. 如果配置了Tushare Token，使用Tushare（标准化数据）
+3. 默认使用AKShare（无需配置）
 """
 
 import asyncio
 
+from data.sources.config import get_current_source, is_source_available
 from data.sources.akshare_adapter import AKShareAdapter
+from data.sources.tushare_adapter import TushareAdapter
 
 ADAPTERS = {
     "akshare": AKShareAdapter(),
 }
 
-DEFAULT_SOURCE = "akshare"
+if is_source_available("tushare"):
+    ADAPTERS["tushare"] = TushareAdapter()
 
-PYTDX_ENABLED = False
+DEFAULT_SOURCE = get_current_source()
 
 
 def get_adapter(source: str = DEFAULT_SOURCE):
