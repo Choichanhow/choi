@@ -7,7 +7,8 @@ MANIFESTO IV: 鲁棒性预设 — 所有接口必须有降级处理
 1. 批量获取: 一次 HTTP 请求拉取全量指数，本地筛选，节省 2/3 请求
 2. 内存缓存: 板块数据 30s TTL，指数数据 5s TTL
 3. 并发安全: 使用 asyncio.Lock 防止竞态条件
-4. 超时保护: 市场广度获取设置 30s 超时，防止挂起
+4. 超时保护: 市场广度获取设置 120s 超时，防止挂起
+5. SQLite本地缓存: 市场广度缓存5分钟，减少等待
 """
 
 import asyncio
@@ -20,6 +21,13 @@ import sys
 import akshare as ak
 import pandas as pd
 
+from data.cache import get_breadth_cache, set_breadth_cache
+from data.fetcher import safe_fetch, format_error_response
+from config.settings import (
+    INDEX_CODES, INDEX_TDX_MAP, FALLBACK_VALUES, ERROR_MESSAGE
+)
+
+
 def _silent_exec(func, *args, **kwargs):
     old_stdout = sys.stdout
     old_stderr = sys.stderr
@@ -30,11 +38,6 @@ def _silent_exec(func, *args, **kwargs):
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr
-
-from data.fetcher import safe_fetch, format_error_response
-from config.settings import (
-    INDEX_CODES, INDEX_TDX_MAP, FALLBACK_VALUES, ERROR_MESSAGE
-)
 
 BREADTH_TIMEOUT = 120.0
 
@@ -198,6 +201,10 @@ class AKShareAdapter:
             return [{"error": True, "reason": f"AKSHARE_ZT_ERROR: {type(e).__name__}"}]
 
     async def fetch_market_breadth(self) -> dict:
+        cached = get_breadth_cache()
+        if cached:
+            return cached
+
         try:
             df = await asyncio.wait_for(
                 asyncio.to_thread(_silent_exec, ak.stock_zh_a_spot_em),
@@ -211,7 +218,7 @@ class AKShareAdapter:
             flat_count = len(df[df["涨跌幅"] == 0])
             total = len(df)
 
-            return {
+            result = {
                 "source": self.name,
                 "up_count": up_count,
                 "down_count": down_count,
@@ -219,6 +226,9 @@ class AKShareAdapter:
                 "total": total,
                 "ratio": round((up_count - down_count) / total * 100, 2) if total > 0 else 0,
             }
+
+            set_breadth_cache(result)
+            return result
         except asyncio.TimeoutError:
             import logging
             logging.warning(f"AKShare市场广度获取超时: {BREADTH_TIMEOUT}秒")

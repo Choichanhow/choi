@@ -18,6 +18,10 @@ APP_RELOAD = os.getenv("APP_RELOAD", "true").lower() == "true"
 
 REFRESH_INTERVAL_SECONDS = int(os.getenv("REFRESH_INTERVAL", "30"))
 
+CACHE_DIR = os.getenv("CACHE_DIR", "data/cache")
+BREADTH_CACHE_TTL = int(os.getenv("BREADTH_CACHE_TTL", "300"))
+INDEX_CACHE_TTL = int(os.getenv("INDEX_CACHE_TTL", "5"))
+
 INDEX_CODES = {
     "shanghai": "000001",
     "shenzhen": "399001",
