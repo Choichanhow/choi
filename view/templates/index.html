@@ -205,9 +205,153 @@
             text-align: center;
             margin-top: 12px;
         }
+
+        .loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(10, 10, 15, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+
+        .loader-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loader-spinner {
+            width: 60px;
+            height: 60px;
+            border: 3px solid #2a2a3e;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loader-status {
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        .loader-status h2 {
+            font-size: 16px;
+            color: #00d4ff;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+        .loader-progress {
+            width: 300px;
+            height: 4px;
+            background: #1a1a2e;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .loader-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .loader-info {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .loader-info .step {
+            margin: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .loader-info .step.active {
+            color: #00d4ff;
+        }
+
+        .loader-info .step.done {
+            color: #00ff88;
+        }
+
+        .loader-info .step-icon {
+            width: 16px;
+            text-align: center;
+        }
+
+        .loading-shimmer {
+            background: linear-gradient(90deg, #1a1a2e 25%, #2a2a3e 50%, #1a1a2e 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .card.loading .price,
+        .card.loading .change-pct {
+            color: transparent !important;
+            background: linear-gradient(90deg, #1a1a2e 25%, #2a2a3e 50%, #1a1a2e 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+            min-width: 80px;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
+    <div class="loader-overlay" id="loader">
+        <div class="loader-spinner"></div>
+        <div class="loader-status">
+            <h2>正在加载市场数据...</h2>
+            <div class="loader-progress">
+                <div class="loader-progress-bar" id="loader-bar" style="width: 0%;"></div>
+            </div>
+            <div class="loader-info">
+                <div class="step" id="step-init">
+                    <span class="step-icon">○</span>
+                    <span>初始化连接</span>
+                </div>
+                <div class="step" id="step-indices">
+                    <span class="step-icon">○</span>
+                    <span>获取指数数据...</span>
+                </div>
+                <div class="step" id="step-breadth">
+                    <span class="step-icon">○</span>
+                    <span>计算市场广度（全量A股，约60秒）...</span>
+                </div>
+                <div class="step" id="step-sectors">
+                    <span class="step-icon">○</span>
+                    <span>加载板块数据...</span>
+                </div>
+                <div class="step" id="step-done">
+                    <span class="step-icon">○</span>
+                    <span>数据加载完成</span>
+                </div>
+            </div>
+            <div style="margin-top: 20px; font-size: 11px; color: #666;">
+                预计剩余时间: <span id="eta">--</span>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>A-SHARE MARKET DASHBOARD</h1>
         <div class="status">
@@ -318,25 +462,82 @@
     </div>
 
     <script>
+        const loaderSteps = {
+            init: { el: 'step-init', progress: 10 },
+            indices: { el: 'step-indices', progress: 30 },
+            breadth: { el: 'step-breadth', progress: 70 },
+            sectors: { el: 'step-sectors', progress: 90 },
+            done: { el: 'step-done', progress: 100 }
+        };
+
+        let loadStartTime = null;
+
+        function updateLoaderStep(stepName) {
+            const step = loaderSteps[stepName];
+            if (!step) return;
+
+            document.getElementById('loader-bar').style.width = step.progress + '%';
+
+            Object.keys(loaderSteps).forEach(key => {
+                const el = document.getElementById(loaderSteps[key].el);
+                const icon = el.querySelector('.step-icon');
+                if (key === stepName) {
+                    el.className = 'step active';
+                    icon.textContent = '◐';
+                } else if (loaderSteps[stepName].progress > loaderSteps[key].progress) {
+                    el.className = 'step done';
+                    icon.textContent = '●';
+                } else {
+                    el.className = 'step';
+                    icon.textContent = '○';
+                }
+            });
+
+            if (loadStartTime && step.progress < 100) {
+                const elapsed = (Date.now() - loadStartTime) / 1000;
+                const estimatedTotal = elapsed / (step.progress / 100);
+                const remaining = Math.max(0, Math.round(estimatedTotal - elapsed));
+                document.getElementById('eta').textContent = `约 ${remaining} 秒`;
+            }
+        }
+
+        function hideLoader() {
+            updateLoaderStep('done');
+            setTimeout(() => {
+                document.getElementById('loader').classList.add('hidden');
+            }, 500);
+        }
+
         async function fetchData() {
+            loadStartTime = Date.now();
+            updateLoaderStep('init');
+
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 240000);
-                
+
+                updateLoaderStep('indices');
+
                 const res = await fetch('/api/market/overview', {
                     signal: controller.signal
                 });
-                
+
                 clearTimeout(timeoutId);
-                
+
                 if (!res.ok) {
                     throw new Error(`HTTP error! status: ${res.status}`);
                 }
-                
+
                 const data = await res.json();
+
+                updateLoaderStep('sectors');
+                updateLoaderStep('done');
+
                 updateUI(data);
+                hideLoader();
             } catch (e) {
                 console.error('Fetch error:', e);
+                document.getElementById('eta').textContent = '加载失败，请刷新重试';
             }
         }
 
