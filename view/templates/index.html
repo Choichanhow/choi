@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>A-Share Market Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -319,7 +320,19 @@
     <script>
         async function fetchData() {
             try {
-                const res = await fetch('/api/market/overview');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 240000);
+                
+                const res = await fetch('/api/market/overview', {
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
                 const data = await res.json();
                 updateUI(data);
             } catch (e) {

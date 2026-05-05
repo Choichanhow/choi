@@ -14,8 +14,22 @@ import asyncio
 import time
 from typing import Optional
 
+import io
+import sys
+
 import akshare as ak
 import pandas as pd
+
+def _silent_exec(func, *args, **kwargs):
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
+    try:
+        return func(*args, **kwargs)
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
 
 from data.fetcher import safe_fetch, format_error_response
 from config.settings import (
@@ -186,7 +200,7 @@ class AKShareAdapter:
     async def fetch_market_breadth(self) -> dict:
         try:
             df = await asyncio.wait_for(
-                asyncio.to_thread(ak.stock_zh_a_spot_em),
+                asyncio.to_thread(_silent_exec, ak.stock_zh_a_spot_em),
                 timeout=BREADTH_TIMEOUT
             )
             if df is None or df.empty:
