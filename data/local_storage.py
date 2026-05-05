@@ -20,6 +20,24 @@ DB_DIR = "data/db"
 DB_PATH = os.path.join(DB_DIR, "market_data.db")
 
 
+def _convert_to_native(obj):
+    """将numpy/pandas类型转换为Python原生类型"""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: _convert_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_to_native(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    return obj
+
+
 def _ensure_db_dir():
     os.makedirs(DB_DIR, exist_ok=True)
 
@@ -77,13 +95,14 @@ def save_daily_index_data(trading_date: datetime.date, data: dict):
     try:
         date_str = trading_date.strftime("%Y-%m-%d")
         now = datetime.datetime.now().timestamp()
-        
+        native_data = _convert_to_native(data)
+
         conn.execute("""
-            INSERT OR REPLACE INTO daily_index_data 
+            INSERT OR REPLACE INTO daily_index_data
             (trading_date, data, created_at, updated_at)
             VALUES (?, ?, ?, ?)
-        """, (date_str, json.dumps(data), now, now))
-        
+        """, (date_str, json.dumps(native_data), now, now))
+
         conn.commit()
     finally:
         conn.close()
@@ -112,13 +131,14 @@ def save_daily_market_breadth(trading_date: datetime.date, data: dict):
     try:
         date_str = trading_date.strftime("%Y-%m-%d")
         now = datetime.datetime.now().timestamp()
-        
+        native_data = _convert_to_native(data)
+
         conn.execute("""
-            INSERT OR REPLACE INTO daily_market_breadth 
+            INSERT OR REPLACE INTO daily_market_breadth
             (trading_date, data, created_at, updated_at)
             VALUES (?, ?, ?, ?)
-        """, (date_str, json.dumps(data), now, now))
-        
+        """, (date_str, json.dumps(native_data), now, now))
+
         conn.commit()
     finally:
         conn.close()
@@ -147,13 +167,14 @@ def save_daily_sectors(trading_date: datetime.date, data: list):
     try:
         date_str = trading_date.strftime("%Y-%m-%d")
         now = datetime.datetime.now().timestamp()
-        
+        native_data = _convert_to_native(data)
+
         conn.execute("""
-            INSERT OR REPLACE INTO daily_sectors 
+            INSERT OR REPLACE INTO daily_sectors
             (trading_date, data, created_at, updated_at)
             VALUES (?, ?, ?, ?)
-        """, (date_str, json.dumps(data), now, now))
-        
+        """, (date_str, json.dumps(native_data), now, now))
+
         conn.commit()
     finally:
         conn.close()

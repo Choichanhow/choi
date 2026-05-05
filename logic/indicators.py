@@ -164,6 +164,7 @@ def calc_sector_rotation(sectors: list[dict], top_n: int = 10) -> list[dict]:
             "lead_stock": s.get("lead_stock", "--"),
             "lead_change_pct": lead_pct,
             "momentum": momentum,
+            "amount": s.get("amount", 0),
             "signal": "UP" if change_pct > 0 else "DOWN",
         })
     return result

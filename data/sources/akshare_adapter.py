@@ -149,6 +149,7 @@ class AKShareAdapter:
                         "change_amount": safe_fetch(row, "涨跌额", 0.0),
                         "up_count": safe_fetch(row, "上涨家数", 0),
                         "down_count": safe_fetch(row, "下跌家数", 0),
+                        "amount": safe_fetch(row, "总市值", 0),
                         "lead_stock": safe_fetch(row, "领涨股票", ERROR_MESSAGE),
                         "lead_change_pct": safe_fetch(row, "领涨股票-涨跌幅", FALLBACK_VALUES["change_pct"]),
                     })

@@ -1,0 +1,45 @@
+{
+  "akshare": {},
+  "pytdx": {
+    "health": {
+      "time": 0.08259820938110352,
+      "status": "success"
+    },
+    "index_sh": {
+      "time": 0.24643921852111816,
+      "status": "success",
+      "price": 11.49
+    },
+    "index_sz": {
+      "time": 0.258878231048584,
+      "status": "success",
+      "price": 15107.55
+    },
+    "index_cy": {
+      "time": 0.23813295364379883,
+      "status": "success",
+      "price": 3677.15
+    },
+    "index_star": {
+      "time": 0.25742650032043457,
+      "status": "success",
+      "price": 51.48
+    }
+  },
+  "tushare": {
+    "health": {
+      "time": 0.5721890926361084,
+      "status": "success"
+    },
+    "index": {
+      "time": 0.4285447597503662,
+      "status": "failed",
+      "price": "--"
+    },
+    "sector": {
+      "time": 0.09459877014160156,
+      "status": "success",
+      "count": 0
+    }
+  }
+}
