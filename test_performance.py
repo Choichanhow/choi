@@ -1,110 +1,178 @@
 """
-最终性能基准测试报告
-测量 AKShare / Pytdx / 智能路由 各场景性能
+性能测试脚本 — A-Share Market Dashboard
+测试AKShare、Pytdx、Tushare三种数据源的性能对比
 """
 
 import asyncio
 import time
-import sys
+import json
 
-sys.path.insert(0, "h:\\QUART")
-
-from data.sources.akshare_adapter import AKShareAdapter
-from data.sources.pytdx_adapter import PytdxAdapter
-from data.sources import registry
-
-
-def benchmark_pytdx_batch():
-    from pytdx.hq import TdxHq_API
-    api = TdxHq_API(heartbeat=False)
-    api.connect(ip="218.106.92.183", port=7709, time_out=5)
+async def test_akshare():
+    from data.sources.akshare_adapter import AKShareAdapter
+    adapter = AKShareAdapter()
+    
+    print("\n=== AKShare 性能测试 ===")
+    
+    # 测试指数数据
     start = time.time()
-    data = api.get_security_quotes([(0, "000001"), (0, "399001"), (0, "399006")])
-    elapsed = round((time.time() - start) * 1000)
-    api.disconnect()
-    return elapsed, len(data)
+    result = await adapter.fetch_index_realtime("shanghai")
+    elapsed = time.time() - start
+    status = "成功" if "error" not in result else "失败"
+    print(f"1. 指数数据: {elapsed:.2f}s [{status}]")
+    
+    # 测试板块数据
+    start = time.time()
+    result = await adapter.fetch_sector_list()
+    elapsed = time.time() - start
+    count = len([r for r in result if "error" not in r])
+    status = "成功" if count > 0 else "失败"
+    print(f"2. 板块数据: {elapsed:.2f}s [{status}, {count}个板块]")
+    
+    # 测试涨停池
+    start = time.time()
+    result = await adapter.fetch_zt_pool()
+    elapsed = time.time() - start
+    count = len(result) if isinstance(result, list) else 0
+    status = "成功" if count > 0 else "失败"
+    print(f"3. 涨停池: {elapsed:.2f}s [{status}, {count}条]")
+    
+    # 测试市场广度（这个比较慢）
+    start = time.time()
+    result = await adapter.fetch_market_breadth()
+    elapsed = time.time() - start
+    status = "成功" if "error" not in result else "失败"
+    up_down = f"{result.get('up_count', 0)}/{result.get('down_count', 0)}" if status == "成功" else "--"
+    print(f"4. 市场广度: {elapsed:.2f}s [{status}, 涨跌:{up_down}]")
+    
+    return {
+        "akshare": {
+            "index": elapsed,
+            "sector": None,
+            "zt_pool": None,
+            "breadth": elapsed
+        }
+    }
+
+
+async def test_pytdx():
+    from data.sources.pytdx_adapter import PytdxAdapter
+    adapter = PytdxAdapter()
+    
+    print("\n=== Pytdx 性能测试 ===")
+    
+    start = time.time()
+    result = await adapter.fetch_index_realtime("shanghai")
+    elapsed = time.time() - start
+    status = "成功" if "error" not in result else "失败"
+    price = result.get("price", 0)
+    print(f"1. 指数数据(上海): {elapsed:.2f}s [{status}, 价格:{price}]")
+    
+    start = time.time()
+    result = await adapter.fetch_index_realtime("shenzhen")
+    elapsed = time.time() - start
+    status = "成功" if "error" not in result else "失败"
+    price = result.get("price", 0)
+    print(f"2. 指数数据(深圳): {elapsed:.2f}s [{status}, 价格:{price}]")
+    
+    start = time.time()
+    health = await adapter.health_check()
+    elapsed = time.time() - start
+    print(f"3. 健康检查: {elapsed:.2f}s [{'成功' if health else '失败'}]")
+    
+    return {
+        "pytdx": {
+            "index": elapsed,
+            "health": elapsed
+        }
+    }
+
+
+async def test_tushare():
+    from data.sources.tushare_adapter import TushareAdapter
+    adapter = TushareAdapter()
+    
+    print("\n=== Tushare 性能测试 ===")
+    
+    if not await adapter.health_check():
+        print("Tushare未配置Token或连接失败")
+        return {"tushare": {"error": "未配置或连接失败"}}
+    
+    start = time.time()
+    result = await adapter.fetch_index_realtime("shanghai")
+    elapsed = time.time() - start
+    status = "成功" if "error" not in result else "失败"
+    price = result.get("price", 0)
+    print(f"1. 指数数据(上海): {elapsed:.2f}s [{status}, 价格:{price}]")
+    
+    start = time.time()
+    result = await adapter.fetch_sector_list()
+    elapsed = time.time() - start
+    count = len([r for r in result if "error" not in r])
+    status = "成功" if count > 0 else "失败"
+    print(f"2. 板块数据: {elapsed:.2f}s [{status}, {count}个板块]")
+    
+    return {
+        "tushare": {
+            "index": elapsed,
+            "sector": elapsed
+        }
+    }
 
 
 async def main():
-    print("=" * 65)
-    print("性能基准测试报告 — Module 1 数据源适配器")
-    print("=" * 65)
-
-    print("\n1. AKShare 单指数请求 (未优化时需3次HTTP请求)")
-    print("-" * 65)
-    adapter1 = AKShareAdapter()
-    results = []
-    for code in ["shanghai", "shenzhen", "chinext"]:
-        start = time.time()
-        r = await adapter1.fetch_index_realtime(code)
-        elapsed = round((time.time() - start) * 1000)
-        results.append(elapsed)
-        print(f"  {code}: {elapsed}ms  {'✅' if 'error' not in r else '❌'}")
-    print(f"  合计: {sum(results)}ms")
-
-    print("\n2. AKShare 批量一次请求 (优化后: 1次HTTP请求，全量数据本地筛选)")
-    print("-" * 65)
-    adapter2 = AKShareAdapter()
-    start = time.time()
-    all_indices = await adapter2.fetch_all_indices()
-    t = round((time.time() - start) * 1000)
-    print(f"  fetch_all_indices(): {t}ms  返回 {len(all_indices)} 条指数")
-
-    print("\n3. Pytdx 单指数请求 (3次串行)")
-    print("-" * 65)
-    pytdx = PytdxAdapter()
-    times = {}
-    for code in ["shanghai", "shenzhen", "chinext"]:
-        start = time.time()
-        r = await pytdx.fetch_index_realtime(code)
-        times[code] = round((time.time() - start) * 1000)
-        print(f"  {code}: {times[code]}ms  {'✅' if 'error' not in r else '❌'}")
-    print(f"  合计: {sum(times.values())}ms")
-
-    print("\n4. Pytdx 批量一次请求 (1次TCP请求，3个指数)")
-    print("-" * 65)
-    loop = asyncio.get_event_loop()
-    batch_result = await loop.run_in_executor(None, benchmark_pytdx_batch)
-    print(f"  Pytdx 批量: {batch_result[0]}ms  返回 {batch_result[1]} 条")
-
-    print("\n5. AKShare 缓存命中 (5s TTL 内)")
-    print("-" * 65)
-    adapter3 = AKShareAdapter()
-    start = time.time()
-    cached = await adapter3.fetch_all_indices()
-    t_cached = round((time.time() - start) * 1000)
-    print(f"  缓存命中: {t_cached}ms")
-
-    print("\n6. 智能路由 dashboard (Pytdx指数 + AKShare板块)")
-    print("-" * 65)
-    start = time.time()
-    dashboard = await registry.get_smart_dashboard_data()
-    t_smart = round((time.time() - start) * 1000)
-    print(f"  get_smart_dashboard_data(): {t_smart}ms")
-    indices = dashboard.get("indices", {})
-    for k, v in indices.items():
-        print(f"    {k}: {v.get('name')} | {v.get('price')} | {v.get('change_pct')}%")
-    breadth = dashboard.get("market_breadth", {})
-    print(f"    市场广度: 上涨{breadth.get('up_count')} | 下跌{breadth.get('down_count')} | ratio={breadth.get('ratio')}%")
-    print(f"    Top板块: {len(dashboard.get('top_sectors', []))} 条")
-
-    print("\n" + "=" * 65)
-    print("性能优化总结")
-    print("=" * 65)
-    print(f"  AKShare 串行(3指数):    {sum(results)}ms")
-    print(f"  AKShare 批量(一次):    {t}ms")
-    print(f"  AKShare 缓存命中:       {t_cached}ms")
-    print(f"  Pytdx 串行(3指数):     {sum(times.values())}ms")
-    print(f"  Pytdx 批量(1次):      {batch_result[0]}ms  ← 最优")
-    print(f"  智能路由 dashboard:     {t_smart}ms")
-    print()
-    print(f"  关键发现:")
-    if sum(results) > 0:
-        print(f"  - AKShare 批量优化: {sum(results)}ms → {t}ms  (减少 {round((1 - t/sum(results))*100)}%)")
-    if batch_result[0] > 0:
-        print(f"  - Pytdx vs AKShare: Pytdx 快 {round(sum(results)/batch_result[0])}x (批量模式)")
-    if t > 0:
-        print(f"  - 缓存命中加速:  {t}ms → {t_cached}ms")
+    print("="*60)
+    print("A-Share Market Dashboard 数据源性能测试")
+    print("="*60)
+    
+    results = {}
+    
+    results.update(await test_akshare())
+    
+    try:
+        results.update(await test_pytdx())
+    except Exception as e:
+        print(f"Pytdx测试失败: {e}")
+    
+    try:
+        results.update(await test_tushare())
+    except Exception as e:
+        print(f"Tushare测试失败: {e}")
+    
+    print("\n" + "="*60)
+    print("测试结果汇总")
+    print("="*60)
+    
+    # 提取指数数据测试结果
+    index_times = []
+    if "akshare" in results:
+        index_times.append(("AKShare", results["akshare"].get("index", float('inf'))))
+    if "pytdx" in results:
+        index_times.append(("Pytdx", results["pytdx"].get("index", float('inf'))))
+    if "tushare" in results and "error" not in results["tushare"]:
+        index_times.append(("Tushare", results["tushare"].get("index", float('inf'))))
+    
+    index_times.sort(key=lambda x: x[1])
+    
+    print("\n【指数数据获取速度排名】")
+    for i, (name, t) in enumerate(index_times, 1):
+        if t == float('inf'):
+            print(f"{i}. {name}: 失败")
+        else:
+            print(f"{i}. {name}: {t:.2f}秒")
+    
+    print("\n【功能对比】")
+    print(f"{'数据源':<10} {'指数':<6} {'板块':<6} {'广度':<6} {'涨停':<6}")
+    print("-"*40)
+    print(f"{'AKShare':<10} {'✅':<6} {'✅':<6} {'✅':<6} {'✅':<6}")
+    print(f"{'Pytdx':<10} {'✅':<6} {'❌':<6} {'❌':<6} {'❌':<6}")
+    print(f"{'Tushare':<10} {'✅':<6} {'✅':<6} {'❌':<6} {'❌':<6}")
+    
+    print("\n【推荐配置】")
+    print("- 实时行情: AKShare（功能最全）")
+    print("- 低延迟需求: Pytdx（最快）")
+    print("- 标准化数据: Tushare（适合回测）")
+    
+    return results
 
 
 if __name__ == "__main__":

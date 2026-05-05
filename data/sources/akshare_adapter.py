@@ -21,7 +21,7 @@ import sys
 import akshare as ak
 import pandas as pd
 
-from data.cache import get_breadth_cache, set_breadth_cache
+from data.cache import get_breadth_cache, set_breadth_cache, validate_cache_data
 from data.fetcher import safe_fetch, format_error_response
 from config.settings import (
     INDEX_CODES, INDEX_TDX_MAP, FALLBACK_VALUES, ERROR_MESSAGE
@@ -201,8 +201,12 @@ class AKShareAdapter:
             return [{"error": True, "reason": f"AKSHARE_ZT_ERROR: {type(e).__name__}"}]
 
     async def fetch_market_breadth(self) -> dict:
+        from data.trading_dates import get_last_trading_date
+        trading_date = get_last_trading_date()
+        date_str = trading_date.strftime("%Y-%m-%d") if trading_date else None
+
         cached = get_breadth_cache()
-        if cached:
+        if cached and validate_cache_data(cached, date_str):
             return cached
 
         try:
@@ -225,6 +229,7 @@ class AKShareAdapter:
                 "flat_count": flat_count,
                 "total": total,
                 "ratio": round((up_count - down_count) / total * 100, 2) if total > 0 else 0,
+                "trading_date": date_str,
             }
 
             set_breadth_cache(result)
