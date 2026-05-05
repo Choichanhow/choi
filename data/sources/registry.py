@@ -224,14 +224,27 @@ async def get_sectors_data() -> dict:
     local_data = get_daily_sectors(trading_date)
     
     if local_data and is_data_fresh(trading_date, max_hours=6):
-        return {"top_sectors": local_data[:10]}
+        return {"top_sectors": local_data}
     
-    sectors = await ADAPTERS["akshare"].fetch_sector_list()
+    sectors = []
+    
+    if "pytdx" in ADAPTERS:
+        try:
+            pytdx_sectors = await ADAPTERS["pytdx"].fetch_industry_sectors()
+            if pytdx_sectors and len(pytdx_sectors) > 0 and "error" not in pytdx_sectors[0]:
+                sectors = pytdx_sectors
+            else:
+                sectors = await ADAPTERS["akshare"].fetch_sector_list()
+        except Exception:
+            sectors = await ADAPTERS["akshare"].fetch_sector_list()
+    else:
+        sectors = await ADAPTERS["akshare"].fetch_sector_list()
+    
     top_sectors = sorted(
         [s for s in sectors if "error" not in s],
         key=lambda x: x.get("change_pct", 0) or 0,
         reverse=True
-    )[:10]
+    )
     
     if top_sectors and trading_date:
         save_daily_sectors(trading_date, top_sectors)

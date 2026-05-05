@@ -157,6 +157,7 @@ def calc_sector_rotation(sectors: list[dict], top_n: int = 10) -> list[dict]:
 
         result.append({
             "rank": rank,
+            "sector_code": s.get("sector_code", ""),
             "sector_name": s.get("sector_name", "--"),
             "change_pct": change_pct,
             "up_count": s.get("up_count", 0),

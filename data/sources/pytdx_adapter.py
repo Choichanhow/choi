@@ -264,3 +264,61 @@ class PytdxAdapter:
                 api.disconnect()
         except Exception as e:
             return format_error_response(f"PYTDX_HISTORICAL_ERROR: {type(e).__name__}: {str(e)}")
+
+    async def fetch_industry_sectors(self) -> list[dict]:
+        from config.tdx_industry import get_tdx_industry_list
+        
+        industries = get_tdx_industry_list()
+        if not industries:
+            return []
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._fetch_industry_sectors_sync, industries)
+
+    def _fetch_industry_sectors_sync(self, industries: list) -> list[dict]:
+        try:
+            from pytdx.hq import TdxHq_API
+            api = TdxHq_API(heartbeat=True)
+            best = self._get_best_server()
+            api.connect(ip=best[0], port=best[1], time_out=5)
+            
+            try:
+                quotes = []
+                for industry in industries:
+                    market = industry["market"]
+                    code = industry["code"]
+                    quotes.append((market, code))
+                
+                data = api.get_security_quotes(quotes)
+                
+                result = []
+                for i, d in enumerate(data):
+                    if d is None:
+                        continue
+                    
+                    industry_info = industries[i]
+                    price = d.get("price", 0) or 0
+                    prev_close = d.get("close", 0) or 0
+                    change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+                    amount = d.get("amount", 0) or 0
+                    
+                    result.append({
+                        "source": self.name,
+                        "sector_code": industry_info["code"],
+                        "sector_name": industry_info["name"],
+                        "market": industry_info["market"],
+                        "price": price,
+                        "change_pct": change_pct,
+                        "change_amount": round(price - prev_close, 2) if price and prev_close else 0.0,
+                        "prev_close": prev_close,
+                        "volume": d.get("vol", 0) or 0,
+                        "amount": amount,
+                        "high": d.get("high", 0) or 0,
+                        "low": d.get("low", 0) or 0,
+                    })
+                
+                return result
+            finally:
+                api.disconnect()
+        except Exception as e:
+            return [{"error": True, "reason": f"PYTDX_INDUSTRY_ERROR: {type(e).__name__}: {str(e)}"}]
